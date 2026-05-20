@@ -13,7 +13,7 @@
 
 ---
 
-[🪐 核心功能](#-核心亮点与卓越交互) • [🛠️ 技术架构](#️-底层技术栈与架构设计) • [📦 立即下载](#-分发与下载通道) • [🚀 开发者指南](#-开发者快速上手) • [⚡ 编译优化](#-生产级编译与二进制体积压榨指南-93mb--55mb)
+[🪐 核心功能](#-核心亮点与卓越交互) • [🛠️ 技术架构](#-底层技术栈与架构设计) • [📦 立即下载](#-分发与下载通道) • [🚀 开发者指南](#-开发者快速上手) • [⚡ 编译优化](#-生产级编译与二进制体积压榨指南-93mb---55mb)
 
 </div>
 
@@ -26,6 +26,12 @@
 ---
 
 ## 🪐 核心亮点与卓越交互
+
+<div align="center">
+  <img src="assets/首页.png" alt="SnapBatch Pro 运行界面" width="85%">
+  <br>
+  <p><i>▲ SnapBatch Pro - 极简与暗黑美学交织的操作界面</i></p>
+</div>
 
 ### 1. 💎 奢华暗黑无边框美学
 摒弃了 Windows 传统的死板原生边框，像素级定制了现代化暗黑美学视窗。
@@ -69,7 +75,7 @@
 
 ```powershell
 # 克隆仓库
-git clone https://github.com/crazyzhang277/SnapBatch.git
+git clone https://github.com/crazyzhang277/SnapBatchPro.git
 cd SnapBatch
 
 # 创建纯净虚拟环境

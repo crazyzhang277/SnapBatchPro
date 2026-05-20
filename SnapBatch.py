@@ -7,7 +7,7 @@ import numpy as np
 from PySide6.QtCore import (
     Qt, QThread, Signal, Slot, QPropertyAnimation,
     QEasingCurve, QPoint, QEvent, QTimer, QRect,
-    QObject  # 💡 修复：已导入 QObject 确保自定义弹窗拖拽不报错
+    QObject
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -25,18 +25,13 @@ class LogTextWidget(QTextEdit):
         # 监听垂直滚动条的位置变化
         self.verticalScrollBar().valueChanged.connect(self.on_scroll_value_changed)
 
-    def mousePressEvent(self, event):
-        if self.main_window.side_panel.width() > 0:
-            self.main_window.toggle_side_panel()
-        super().mousePressEvent(event)
+    # 💡 优化：已删除原本此处的 mousePressEvent。
+    # 现在界面的点击收回逻辑已经由主窗口的全局 eventFilter 统一接管，保留此方法会导致事件冲突。
 
     def wheelEvent(self, event):
         """核心交互 1：监听鼠标滚轮事件（动作判定，零延迟）"""
-        # angleDelta().y() > 0 代表滚轮正在向上滚动
         if event.angleDelta().y() > 0:
-            # 只要手指往上拨动了哪怕一下，在滚动条发生位移前，直接锁死跟随
             self.is_auto_scroll = False
-
         super().wheelEvent(event)
 
     def keyPressEvent(self, event):
@@ -49,18 +44,11 @@ class LogTextWidget(QTextEdit):
         """核心交互 3：精准控制绝对位置。彻底解决日志拉长后，临界点漂移到中间的 Bug"""
         scrollbar = self.verticalScrollBar()
         max_pos = scrollbar.maximum()
-
-        # 💡 【终极精准算法】：
-        # max_pos 就是当前滚动条能到达的最底层、最极限的位置。
-        # 我们用物理最底层减去当前位置，得到的就是滑块距离死底部的【绝对像素差值】。
-        # 只要这个差值大于 10 像素（稍微往上走了一丁点点），就立刻断开。
-        # 如果小于 10 像素，说明滑块已经贴在死底上了，恢复自动跟随。
         distance_to_bottom = max_pos - value
 
         if distance_to_bottom <= 10:
             self.is_auto_scroll = True
         else:
-            # 如果鼠标正在按住滑块往上拖，在这里做二次兜底拦截
             if scrollbar.isSliderDown():
                 self.is_auto_scroll = False
 
@@ -99,7 +87,6 @@ class VideoWorker(QThread):
             os.makedirs(self.output_dir)
 
         try:
-            # 💡 优化：显式使用兼容性更好的 FFMPEG 后端打开视频，防止 Windows 下中文路径概率性打不开
             video_files = [f for f in os.listdir(self.video_dir) if f.lower().endswith(valid_extensions)]
         except Exception as e:
             self.log_signal.emit(f"❌ 读取文件夹失败: {str(e)}")
@@ -199,10 +186,12 @@ class LuxuryVideoExtractor(QMainWindow):
         self._cursor_overridden = False
         self.BORDER_WIDTH = 13
 
+        # 💡 核心修改：不仅为自身安装，还为所有子控件强制安装事件过滤器，确信不漏掉任何一个点击操作
         self.installEventFilter(self)
         self.setMouseTracking(True)
         for child in self.findChildren(QWidget):
             child.setMouseTracking(True)
+            child.installEventFilter(self)
 
         # Windows 风格边缘吸附预览
         self.snap_preview = QWidget()
@@ -303,13 +292,29 @@ class LuxuryVideoExtractor(QMainWindow):
                 QTimer.singleShot(150, lambda: self.snap_preview.hide() if self.current_snap_mode is None else None)
 
     def eventFilter(self, obj, event):
+        # 💡 核心修复：全局判断鼠标点击，处理“点击空白处收回侧边栏”
         if event.type() == QEvent.MouseButtonPress:
-            if self.side_panel.width() > 0:
+            # 判断是否有折叠动画正在播放（防止事件冒泡导致子控件和父控件同一瞬间触发两次，陷入死循环）
+            is_animating = hasattr(self, 'animation') and self.animation.state() == QPropertyAnimation.Running
+
+            if self.side_panel.width() > 0 and not is_animating:
+                # 获取屏幕全局绝对坐标
                 global_pos = event.globalPosition().toPoint()
-                if not self.side_panel.geometry().contains(global_pos) and \
-                        not self.btn_menu.geometry().contains(global_pos):
+
+                # 获取“豁免区域”的全局矩形边框 (MapToGlobal 转换父组件相对坐标系为全局坐标系)
+                side_rect = QRect(self.side_panel.mapToGlobal(QPoint(0, 0)), self.side_panel.size())
+                btn_menu_rect = QRect(self.btn_menu.mapToGlobal(QPoint(0, 0)), self.btn_menu.size())
+                input_rect1 = QRect(self.entry_input.mapToGlobal(QPoint(0, 0)), self.entry_input.size())
+                input_rect2 = QRect(self.entry_output.mapToGlobal(QPoint(0, 0)), self.entry_output.size())
+
+                # 如果点击位置既不在侧边栏内，也不在菜单按钮和两个输入框上，自动折叠它！
+                if not side_rect.contains(global_pos) and \
+                        not btn_menu_rect.contains(global_pos) and \
+                        not input_rect1.contains(global_pos) and \
+                        not input_rect2.contains(global_pos):
                     self.toggle_side_panel()
 
+        # 原本的 Resize 拖拽改变窗口大小及鼠标样式变动逻辑保持不变
         if event.type() in (QEvent.MouseMove, QEvent.HoverMove, QEvent.MouseButtonPress, QEvent.MouseButtonRelease):
             if self.isActiveWindow() and not self.isMaximized():
                 global_pos = QCursor.pos()
@@ -854,13 +859,12 @@ class LuxuryVideoExtractor(QMainWindow):
         dlg_layout.addWidget(dialog_container)
 
         def on_github_clicked():
-            webbrowser.open("https://github.com/crazyzhang277/SnapBatch")
+            webbrowser.open("https://github.com/crazyzhang277/SnapBatchPro.git")
             dlg.accept()
 
         btn_close.clicked.connect(dlg.reject)
         btn_github.clicked.connect(on_github_clicked)
 
-        # 💡 自定义事件过滤器：赋予无边框弹窗“全局可按住拖拽”能力
         class DialogDragFilter(QObject):
             def __init__(self, target_dialog):
                 super().__init__()
@@ -924,7 +928,6 @@ class LuxuryVideoExtractor(QMainWindow):
         self.btn_start.setText("🚀 开始批量提取")
 
     def closeEvent(self, event):
-        """💡 优化：重写关闭事件，如果在提取过程中退出，强制注销并解绑子线程资源防止内存报错崩溃"""
         if hasattr(self, 'worker') and self.worker.isRunning():
             self.worker.quit()
             self.worker.wait()
