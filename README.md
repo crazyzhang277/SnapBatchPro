@@ -170,8 +170,6 @@ pyinstaller --clean --noconfirm --upx-dir="." SnapBatch.spec
 - [x] **毫秒级帧定位**：支持精确到小数点后两位的秒数输入与精准截取。
 - [ ] 🚧 **灵活导出多规则命名引擎（开发中）**：未来将支持按 `[原文件名]` + `[分辨率]` + `[截取时间戳]` 自定义组合命名规则。
 
-欢迎各位开发者提交 [打开新 Issue](https://github.com/crazyzhang277/SnapBatch/issues) 或发起 [提交 Pull Request](https://github.com/crazyzhang277/SnapBatch/pulls) 参与美化 UI、增强编解码兼容性或优化打包算法！
-
 ---
 
 ## 📜 法律授权声明
