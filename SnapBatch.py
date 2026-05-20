@@ -126,12 +126,11 @@ class VideoWorker(QThread):
             if ret:
                 encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 100]
                 res, img_encode = cv2.imencode('.jpg', frame, encode_param)
-                if res:
-                    img_encode.tofile(output_image_path)
-                    self.log_signal.emit(f"[成功] 已提取: {base_name}.jpg")
-                    success_count += 1
-                else:
-                    self.log_signal.emit(f"[失败] 图像编码失败: {video_file}")
+                # 💡 使用 Python 原生文件流进行“无损写入”，彻底摆脱对 NumPy 特有方法的显式依赖
+                with open(output_image_path, 'wb') as f:
+                    f.write(img_encode.tobytes())
+                self.log_signal.emit(f"[成功] 已提取: {base_name}.jpg")
+                success_count += 1
             else:
                 self.log_signal.emit(f"[失败] 无法读取指定帧: {video_file}")
             cap.release()

@@ -1,41 +1,39 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 a = Analysis(
-    ['.venv/SnapBatch.py'],
+    ['SnapBatch.py'],
     pathex=[],
     binaries=[],
     datas=[('assets/首页.png', 'assets')],
-    hiddenimports=[],
+    hiddenimports=['numpy'],  # 强制保证 numpy 导入正常
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    # 基础排除
+    # 💡 修正：移除了 'urllib', 'http', 'xml', 'email'，只保留绝对安全的排除项
     excludes=[
         'PySide6.QtNetwork', 'PySide6.QtQml', 'PySide6.QtSql', 'PySide6.QtXml',
         'PySide6.QtMultimedia', 'PySide6.QtCharts', 'PySide6.QtSpatialAudio',
-        'PySide6.QtWebEngineCore', 'PySide6.Qt3DCore', 'PySide6.QtQuick'
+        'PySide6.QtWebEngineCore', 'PySide6.Qt3DCore', 'PySide6.QtQuick',
+        'unittest', 'pydoc', 'tkinter'
     ],
     noarchive=False,
     optimize=2,
 )
 
-# 💡 1. 修正后的 Qt6 垃圾模块绝对拦截词（去掉了‘qt’，直接精准切除带数字6的组件）
+# 💡 核心控体：清理真正占地方的 Qt 无用图片插件（立减数十 MB）
 discard_qt_keywords = {
     'network', 'qml', 'quick', 'sql', 'xml', 'multimedia',
     'charts', 'spatialaudio', 'webengine', '3d', 'opengl',
-    'virtualkeyboard', 'positioning', 'pdf', 'designer', 'assistant'
+    'virtualkeyboard', 'positioning', 'pdf', 'designer', 'assistant',
+    'qgif', 'qjpeg', 'qwebp', 'qsvg', 'qico', 'tls', 'networkinformation'
 }
-
-# 💡 2. 修正后的 NumPy 2.x 数学加速库绝对拦截词（直接用 openblas 斩断 libscipy_openblas）
-discard_math_keywords = {'openblas', 'mkl', 'tbb', 'quadmath'}
 
 a.binaries = [
     item for item in a.binaries
     if not any(qt_mod in item[0].lower() or qt_mod in item[1].lower() for qt_mod in discard_qt_keywords)
-    and not any(math_mod in item[0].lower() or math_mod in item[1].lower() for math_mod in discard_math_keywords)
 ]
 
-# 3. 自动过滤 Qt 多国语言包
+# 仅保留中文语言包
 def filter_translations(toc):
     return [x for x in toc if not ('qttranslations' in x[1].lower() and 'qt_zh_CN' not in x[0])]
 
@@ -55,9 +53,9 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
-    icon=['.venv/app.ico'],
-    # 4. 排除无法压缩的系统核心 DLL
+    upx=True,      # 保持 UPX 压缩开启
+    icon=['app.ico'],
+    # 核心守卫：防止系统 DLL 损坏
     upx_exclude=[
         'api-ms-win-core-*.dll',
         'api-ms-win-crt-*.dll',
@@ -65,10 +63,10 @@ exe = EXE(
         'vcruntime140_1.dll',
         'msvcp140.dll',
         'ucrtbase.dll',
-        'python3.dll'  # 排除掉你日志里报错的 python3.dll
+        'python3.dll'
     ],
     runtime_tmpdir=None,
-    console=False,
+    console=False, # 关闭黑窗口
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
