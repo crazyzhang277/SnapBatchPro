@@ -82,63 +82,78 @@ class VideoWorker(QThread):
         self.target_time = target_time
 
     def run(self):
-        valid_extensions = (".mp4", ".avi", ".mkv", ".mov", ".flv", ".wmv", ".webm")
-        if not os.path.exists(self.output_dir):
-            os.makedirs(self.output_dir)
-
+        valid_extensions = (".mp4", ".avi", ".mkv", ".mov", ".flv", ".wmv", ".webm", ".m4v", ".ts")
         try:
-            video_files = [f for f in os.listdir(self.video_dir) if f.lower().endswith(valid_extensions)]
+            if not os.path.exists(self.output_dir):
+                os.makedirs(self.output_dir, exist_ok=True)
+
+            try:
+                video_files = [f for f in os.listdir(self.video_dir) if f.lower().endswith(valid_extensions)]
+            except Exception as e:
+                self.log_signal.emit(f"❌ 读取文件夹失败: {str(e)}")
+                return
+
+            if not video_files:
+                self.log_signal.emit("❌ 错误：未在指定目录中找到任何支持的视频文件！")
+                return
+
+            self.log_signal.emit(f"🚀 找到 {len(video_files)} 个视频，目标截取点: 第 {self.target_time} 秒...")
+            self.log_signal.emit("=" * 70)
+
+            success_count = 0
+            for video_file in video_files:
+                if self.isInterruptionRequested():
+                    self.log_signal.emit("⚠️ 处理已被用户中止！")
+                    break
+
+                video_path = os.path.join(self.video_dir, video_file)
+                base_name = os.path.splitext(video_file)[0]
+                output_image_path = os.path.join(self.output_dir, f"{base_name}.jpg")
+
+                try:
+                    cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
+                    if not cap.isOpened():
+                        self.log_signal.emit(f"[失败] 无法打开: {video_file}")
+                        continue
+
+                    total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                    fps = cap.get(cv2.CAP_PROP_FPS)
+
+                    if self.target_time > 0:
+                        target_ms = self.target_time * 1000
+                        if fps > 0 and total_frames > 0:
+                            duration_ms = (total_frames / fps) * 1000
+                            if target_ms >= duration_ms:
+                                target_ms = max(0.0, duration_ms - 100.0)
+                        cap.set(cv2.CAP_PROP_POS_MSEC, target_ms)
+
+                    ret, frame = cap.read()
+                    if not ret and self.target_time > 0:
+                        cap.set(cv2.CAP_PROP_POS_MSEC, 0)
+                        ret, frame = cap.read()
+                        if ret:
+                            self.log_signal.emit(f"⚠️ 警告: {video_file} Seek 到 {self.target_time} 秒失败，已降级提取第 0 帧")
+
+                    if ret:
+                        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 100]
+                        res, img_encode = cv2.imencode('.jpg', frame, encode_param)
+                        with open(output_image_path, 'wb') as f:
+                            f.write(img_encode.tobytes())
+                        self.log_signal.emit(f"[成功] 已提取: {base_name}.jpg")
+                        success_count += 1
+                    else:
+                        self.log_signal.emit(f"[失败] 无法读取指定帧: {video_file}")
+                    cap.release()
+                except Exception as e:
+                    self.log_signal.emit(f"[失败] 处理文件 {video_file} 时出错: {str(e)}")
+
+            self.log_signal.emit("=" * 70)
+            self.log_signal.emit(f"🎉 全部处理完成！成功提取 {success_count}/{len(video_files)} 个视频。")
+            self.log_signal.emit(f"📁 截图已保存至: {self.output_dir}")
         except Exception as e:
-            self.log_signal.emit(f"❌ 读取文件夹失败: {str(e)}")
+            self.log_signal.emit(f"❌ 后台线程严重异常: {str(e)}")
+        finally:
             self.finished_signal.emit()
-            return
-
-        if not video_files:
-            self.log_signal.emit("❌ 错误：未在指定目录中找到任何支持的视频文件！")
-            self.finished_signal.emit()
-            return
-
-        self.log_signal.emit(f"🚀 找到 {len(video_files)} 个视频，目标截取点: 第 {self.target_time} 秒...")
-        self.log_signal.emit("=" * 70)
-
-        success_count = 0
-        for video_file in video_files:
-            video_path = os.path.join(self.video_dir, video_file)
-            base_name = os.path.splitext(video_file)[0]
-            output_image_path = os.path.join(self.output_dir, f"{base_name}.jpg")
-
-            cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
-            if not cap.isOpened():
-                self.log_signal.emit(f"[失败] 无法打开: {video_file}")
-                continue
-
-            total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-            fps = cap.get(cv2.CAP_PROP_FPS)
-
-            if fps > 0:
-                duration_ms = (total_frames / fps) * 1000
-                target_ms = self.target_time * 1000
-                if target_ms >= duration_ms:
-                    target_ms = max(0.0, duration_ms - 100.0)
-                cap.set(cv2.CAP_PROP_POS_MSEC, target_ms)
-
-            ret, frame = cap.read()
-            if ret:
-                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 100]
-                res, img_encode = cv2.imencode('.jpg', frame, encode_param)
-                # 💡 使用 Python 原生文件流进行“无损写入”，彻底摆脱对 NumPy 特有方法的显式依赖
-                with open(output_image_path, 'wb') as f:
-                    f.write(img_encode.tobytes())
-                self.log_signal.emit(f"[成功] 已提取: {base_name}.jpg")
-                success_count += 1
-            else:
-                self.log_signal.emit(f"[失败] 无法读取指定帧: {video_file}")
-            cap.release()
-
-        self.log_signal.emit("=" * 70)
-        self.log_signal.emit(f"🎉 全部处理完成！成功提取 {success_count}/{len(video_files)} 个视频。")
-        self.log_signal.emit(f"📁 截图已保存至: {self.output_dir}")
-        self.finished_signal.emit()
 
 
 class ModernLineEdit(QLineEdit):
@@ -156,7 +171,9 @@ class ModernLineEdit(QLineEdit):
     def dropEvent(self, event):
         urls = event.mimeData().urls()
         if urls:
-            local_path = urls[0].toLocalFile()
+            local_path = urls[0].toLocalFile().strip('\'" ')
+            if os.path.isfile(local_path):
+                local_path = os.path.dirname(local_path)
             self.setText(local_path)
 
 
@@ -169,10 +186,9 @@ class LuxuryVideoExtractor(QMainWindow):
         self.is_dragging = False
         self.is_snapped_left = False
         self.is_snapped_right = False
-        self.normal_geometry = None
-
         self.resize(800, 660)
         self.setMinimumSize(800, 660)
+        self.normal_geometry = QRect(100, 100, 800, 660)
         self.setWindowIcon(get_integrated_icon())
         self.drag_position = QPoint()
 
@@ -306,11 +322,20 @@ class LuxuryVideoExtractor(QMainWindow):
                 input_rect1 = QRect(self.entry_input.mapToGlobal(QPoint(0, 0)), self.entry_input.size())
                 input_rect2 = QRect(self.entry_output.mapToGlobal(QPoint(0, 0)), self.entry_output.size())
 
-                # 如果点击位置既不在侧边栏内，也不在菜单按钮和两个输入框上，自动折叠它！
+                clicked_widget = QApplication.widgetAt(global_pos)
+                is_interactive_control = False
+                if clicked_widget:
+                    if isinstance(clicked_widget, (QPushButton, QLineEdit, QTextEdit)):
+                        is_interactive_control = True
+                    elif hasattr(self, 'title_bar') and self.title_bar.rect().contains(self.title_bar.mapFromGlobal(global_pos)):
+                        is_interactive_control = True
+
+                # 如果点击位置既不在侧边栏内，也不在菜单按钮、输入框、其他交互组件上，自动折叠它！
                 if not side_rect.contains(global_pos) and \
                         not btn_menu_rect.contains(global_pos) and \
                         not input_rect1.contains(global_pos) and \
-                        not input_rect2.contains(global_pos):
+                        not input_rect2.contains(global_pos) and \
+                        not is_interactive_control:
                     self.toggle_side_panel()
 
         # 原本的 Resize 拖拽改变窗口大小及鼠标样式变动逻辑保持不变
@@ -771,6 +796,7 @@ class LuxuryVideoExtractor(QMainWindow):
     def show_about_dialog(self):
         """✨ 自定义奢华暗黑无边框关于弹窗（带完全可拖拽和联动关闭）"""
         dlg = QDialog(self)
+        dlg.setAttribute(Qt.WA_DeleteOnClose)
         dlg.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         dlg.setAttribute(Qt.WA_TranslucentBackground)
         dlg.setFixedSize(550, 400)
@@ -825,7 +851,7 @@ class LuxuryVideoExtractor(QMainWindow):
         content_html = f"""
             <h3 style='font-family: "Microsoft YaHei"; color: {title_color}; margin-bottom: 8px;'>视频帧批量提取工具 Pro</h3>
             <p style='color: #cbd5e1; font-size: 13px; margin: 5px 0;'>
-             📦 <b>当前版本:</b> v1.1.0  |  📜 <b>授权协议:</b> MIT <br>
+             📦 <b>当前版本:</b> v1.2.0  |  📜 <b>授权协议:</b> MIT <br>
              🧑‍🎄 <b>核心开发者:</b> 西瓜味的葡萄🍇
             </p>
             <hr style='border: 0; border-top: 1px solid #1e293b; margin: 10px 0;'>
@@ -901,20 +927,33 @@ class LuxuryVideoExtractor(QMainWindow):
     def append_log(self, text):
         self.log_text.append(text)
         if self.log_text.is_auto_scroll:
-            self.log_text.ensureCursorVisible()
+            sb = self.log_text.verticalScrollBar()
+            sb.setValue(sb.maximum())
 
     def start_processing(self):
         self.log_text.clear()
-        video_dir = self.entry_input.text().strip()
-        output_dir = self.entry_output.text().strip()
+        video_dir = self.entry_input.text().strip('\'" ')
+        output_dir = self.entry_output.text().strip('\'" ')
         time_str = self.entry_time.text().strip()
+
+        if os.path.isfile(video_dir):
+            video_dir = os.path.dirname(video_dir)
+
         if not video_dir or not output_dir:
             self.append_log("⚠️ 提示：请先选择或拖入视频文件夹和图片保存路径！")
             return
         if not os.path.isdir(video_dir):
             self.append_log(f"❌ 错误：指定的视频文件夹不存在，请核对！\n路径: {video_dir}")
             return
-        target_time = float(time_str) if time_str and time_str != "." else 0.0
+
+        try:
+            target_time = float(time_str) if time_str and time_str != "." else 0.0
+            if target_time < 0:
+                raise ValueError("时间不能为负数")
+        except ValueError:
+            self.append_log(f"❌ 错误：提取时间点数值无效 ('{time_str}')，请输入合法的正数！")
+            return
+
         self.btn_start.setEnabled(False)
         self.btn_start.setText("⏳ 正在全力处理中，请稍候...")
         self.worker = VideoWorker(video_dir, output_dir, target_time)
@@ -928,8 +967,8 @@ class LuxuryVideoExtractor(QMainWindow):
 
     def closeEvent(self, event):
         if hasattr(self, 'worker') and self.worker.isRunning():
-            self.worker.quit()
-            self.worker.wait()
+            self.worker.requestInterruption()
+            self.worker.wait(2000)
         event.accept()
 
 
